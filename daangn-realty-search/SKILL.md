@@ -88,6 +88,7 @@ python3 ... detail "https://realty.daangn.com/articles/2947028"
 ```
 
 옵션: `--limit`(기본 20), `--titles N`(상세로 제목·층수 보강할 상위 N, 기본 5, 0=끔), `--expand`/`--expand-max`(기본 6).
+기존 CLI 호환 옵션인 `--keyword`는 반환 매물의 공개 필드 텍스트를 필터링한다. `--only-verified`는 공개 피드에서 별도 인증 필드를 제공하지 않아 호환 목적으로만 허용한다.
 
 ## Output fields
 
@@ -117,5 +118,5 @@ python3 ... detail "https://realty.daangn.com/articles/2947028"
 
 ## Notes
 
-- Windows stdout 한글 깨짐 방지: `sys.stdout.reconfigure(encoding='utf-8')` 적용됨.
+- Windows stdout 한글 깨짐 방지: 지원 런타임에서는 `sys.stdout.reconfigure(encoding='utf-8')`를 적용한다.
 - `area`·가격 필드가 문자열로 오는 케이스가 있어 모든 수치 연산 전 float 변환 가드.

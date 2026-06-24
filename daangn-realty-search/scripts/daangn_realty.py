@@ -13,22 +13,31 @@ RELAY_STORE 경로:
 가격 단위: 만원 (deposit 2000 = 2천만원, monthlyPay 100 = 100만원, price 28700 = 2억8700만).
 층수: 상세 페이지 JSON-LD additionalProperty 의 floor/topFloor.
 """
-import argparse, json, re, sys, urllib.parse, urllib.request
+import argparse
+import json
+import pathlib
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
-# Windows 등에서 stdout 한글 깨짐 방지
-try:
-    sys.stdout.reconfigure(encoding='utf-8')
-except Exception:
-    pass
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from daangn_detail_ld import parse_detail as _parse_detail
+from daangn_relay_store import extract_articles, extract_relay_store
+
+reconfigure_stdout = getattr(sys.stdout, "reconfigure", None)
+if callable(reconfigure_stdout):
+    try:
+        reconfigure_stdout(encoding="utf-8")
+    except (OSError, ValueError):
+        pass
 
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "text/html,application/json;q=0.9,*/*;q=0.8"}
 REGION_API = "https://www.daangn.com/kr/api/v1/regions/keyword?keyword="
 MAP_BASE = "https://realty.daangn.com/map/"
-DETAIL_BASE = "https://realty.daangn.com/articles/"
-
-PY_PER_SQM = 3.305785  # 1평 = 3.305785㎡
-
-TRADE_LABEL = {"MONTH": "월세", "BUY": "매매", "BORROW": "전세"}
 
 
 def fetch_json(url):
@@ -72,7 +81,7 @@ def find_sibling_regions(sel, max_siblings=6):
         return []
     try:
         data = fetch_json(REGION_API + urllib.parse.quote(name2.split()[-1]))
-    except Exception:
+    except (json.JSONDecodeError, OSError, TimeoutError, urllib.error.URLError):
         return []
     sibs = []
     seen = {sel.get("name3Id")}
@@ -96,188 +105,15 @@ def map_url(sel):
     return MAP_BASE + path
 
 
-# ------------------------- RELAY_STORE 파싱 -------------------------
-
-def extract_relay_store(html):
-    """window.RELAY_STORE = "<json-string>"; 를 dict 로 디코드."""
-    m = re.search(r'window\.RELAY_STORE\s*=\s*"((?:[^"\\]|\\.)*)"', html)
-    if m:
-        try:
-            return json.loads(json.loads('"' + m.group(1) + '"'))
-        except Exception:
-            pass
-    # 혹시 객체 리터럴로 박힌 경우 (balanced scan)
-    i = html.find("window.RELAY_STORE")
-    if i >= 0:
-        eq = html.find("=", i)
-        s = html[eq + 1:]
-        depth = 0; instr = False; esc = False; q = ""; end = 0
-        for idx, ch in enumerate(s):
-            if instr:
-                if esc: esc = False
-                elif ch == "\\": esc = True
-                elif ch == q: instr = False
-            else:
-                if ch in "\"'": instr = True; q = ch
-                elif ch == "{": depth += 1
-                elif ch == "}":
-                    depth -= 1
-                    if depth == 0:
-                        end = idx + 1; break
-        if end:
-            try:
-                return json.loads(s[:end])
-            except Exception:
-                pass
-    return None
-
-
-def _deref(store, ref):
-    if isinstance(ref, dict) and "__ref" in ref:
-        return store.get(ref["__ref"])
-    return ref
-
-
-def _refs(store, node, key):
-    """edges 처럼 __refs 배열 / __ref 단일 / list 모두 대응."""
-    v = node.get(key)
-    out = []
-    if isinstance(v, dict):
-        if "__refs" in v:
-            out = [store.get(r) for r in v["__refs"]]
-        elif "__ref" in v:
-            out = [store.get(v["__ref"])]
-    elif isinstance(v, list):
-        for x in v:
-            if isinstance(x, dict) and "__ref" in x:
-                out.append(store.get(x["__ref"]))
-    return [o for o in out if o]
-
-
-def sales_type(store, article):
-    st = _deref(store, article.get("salesTypeV3"))
-    if isinstance(st, dict):
-        return st.get("type") or st.get("name")
-    return None
-
-
-def parse_trade(store, trade):
-    """Month/Buy/BorrowTrade → (label, deposit, monthly, price)."""
-    tn = trade.get("__typename")
-    if tn == "MonthTrade":
-        return ("MONTH", trade.get("deposit"), trade.get("monthlyPay"), None)
-    if tn == "BuyTrade":
-        return ("BUY", None, None, trade.get("price"))
-    if tn == "BorrowTrade":
-        return ("BORROW", trade.get("deposit"), None, None)
-    # fallback: type 필드
-    t = trade.get("type")
-    return (t, trade.get("deposit"), trade.get("monthlyPay"), trade.get("price"))
-
-
-def per_pyeong(kind, deposit, monthly, price, pyeong):
-    """거래유형별 평당 단가(만원/평). 월세=월세/평, 매매=매매가/평, 전세=보증금/평."""
-    if not pyeong or pyeong <= 0:
-        return None
-    base = None
-    if kind == "MONTH":
-        base = monthly
-    elif kind == "BUY":
-        base = price
-    elif kind == "BORROW":
-        base = deposit
-    if base is None:
-        return None
-    try:
-        base = float(base)
-    except (TypeError, ValueError):
-        return None
-    return round(base / pyeong, 2)
-
-
-def extract_articles(store, max_items):
-    """RELAY_STORE → 매물 리스트.
-
-    ArticleFeedConnection.edges → ArticleFeedEdge.node(ArticleFeedCard).article(Article)
-    스토어에 ArticleFeedCard 가 직접 다 있으므로, Card 를 순회하는 게 가장 견고하다.
-    """
-    items = []
-    cards = [v for v in store.values()
-             if isinstance(v, dict) and v.get("__typename") == "ArticleFeedCard"]
-    for card in cards:
-        art = _deref(store, card.get("article"))
-        if not art or art.get("__typename") != "Article":
-            continue
-        area = art.get("area")
-        try:
-            area = float(area) if area is not None and area != "" else None
-        except (TypeError, ValueError):
-            area = None
-        pyeong = round(area / PY_PER_SQM, 2) if area else None
-        trades_out = []
-        for tr in _refs(store, art, "trades"):
-            kind, dep, mon, prc = parse_trade(store, tr)
-            trades_out.append({
-                "type": kind,
-                "label": TRADE_LABEL.get(kind, kind),
-                "deposit_manwon": dep,
-                "monthly_manwon": mon,
-                "price_manwon": prc,
-                "per_pyeong_manwon": per_pyeong(kind, dep, mon, prc, pyeong),
-            })
-        items.append({
-            "article_id": art.get("originalId"),
-            "salesType": sales_type(store, art),
-            "area_sqm": area,
-            "area_pyeong": pyeong,
-            "trades": trades_out,
-            "url": DETAIL_BASE + str(art.get("originalId")) if art.get("originalId") else None,
-        })
-        if len(items) >= max_items:
-            break
-    return items
-
-
 # ------------------------- 상세(JSON-LD) -------------------------
 
 def parse_detail(url):
-    html = fetch_text(url)
-    out = {"source": url, "title": None, "address": None, "floor": None, "top_floor": None,
-           "floor_label": None, "nearby_subway": None, "json_ld": []}
-    lds = re.findall(r'<script[^>]*application/ld\+json[^>]*>(.*?)</script>', html, re.S)
-    for ld in lds:
-        try:
-            d = json.loads(ld)
-        except Exception:
-            continue
-        out["json_ld"].append(d)
-        items = d.get("@graph") if isinstance(d, dict) and "@graph" in d else (d if isinstance(d, list) else [d])
-        for o in items:
-            if not isinstance(o, dict):
-                continue
-            if o.get("@type") == "Product" and not out["title"]:
-                out["title"] = o.get("name")
-            if o.get("@type") == "Place" and not out["address"]:
-                out["address"] = o.get("name")
-            for prop in (o.get("additionalProperty") or []):
-                nm = prop.get("name"); val = prop.get("value")
-                if nm == "floor":
-                    out["floor"] = val
-                elif nm == "topFloor":
-                    out["top_floor"] = val
-                elif nm == "nearbySubwayStation":
-                    out["nearby_subway"] = val
-    if out["floor"] is not None:
-        fl = str(out["floor"]).replace(".0", "")
-        tf = str(out["top_floor"]).replace(".0", "") if out["top_floor"] is not None else "?"
-        out["floor_label"] = f"{fl}층/{tf}층"
-    out["json_ld"] = out["json_ld"][:3]
-    return out
+    return _parse_detail(url, fetch_text)
 
 
 # ------------------------- 커맨드 -------------------------
 
-def collect_for_region(sel, sales_type_filter, trade_type_filter, limit):
+def collect_for_region(sel, sales_type_filter, trade_type_filter, limit, keyword=None):
     url = map_url(sel)
     html = fetch_text(url)
     store = extract_relay_store(html)
@@ -291,6 +127,9 @@ def collect_for_region(sel, sales_type_filter, trade_type_filter, limit):
     if trade_type_filter:
         tset = {t.strip().upper() for t in trade_type_filter.split(",")}
         items = [it for it in items if any((tr["type"] or "").upper() in tset for tr in it["trades"])]
+    if keyword:
+        needle = keyword.casefold()
+        items = [it for it in items if needle in json.dumps(it, ensure_ascii=False).casefold()]
     return url, items, None
 
 
@@ -306,8 +145,8 @@ def cmd_search(args):
     seen = set()
     for rg in regions:
         try:
-            url, items, err = collect_for_region(rg, args.sales_type, args.trade_type, args.limit)
-        except Exception as e:
+            url, items, err = collect_for_region(rg, args.sales_type, args.trade_type, args.limit, args.keyword)
+        except (json.JSONDecodeError, OSError, TimeoutError, urllib.error.URLError) as e:
             errors.append({"region": rg.get("name3"), "error": str(e)})
             continue
         sources.append({"region": f"{rg.get('name1')} {rg.get('name2')} {rg.get('name3')}", "url": url,
@@ -331,7 +170,7 @@ def cmd_search(args):
                 it["address"] = d.get("address")
                 it["floor_label"] = d.get("floor_label")
                 it["nearby_subway"] = d.get("nearby_subway")
-            except Exception:
+            except (json.JSONDecodeError, OSError, TimeoutError, urllib.error.URLError):
                 pass
 
     print_json({
@@ -357,6 +196,8 @@ def build_parser():
     s.add_argument("--region", required=True, help="동 이름 (예: 매교동, 합정동)")
     s.add_argument("--sales-type", help="용도 필터(콤마구분): APART,OFFICETEL,STORE,OPEN_ONE_ROOM,SPLIT_ONE_ROOM,TWO_ROOM,HOUSE")
     s.add_argument("--trade-type", help="거래 필터(콤마구분): MONTH(월세),BUY(매매),BORROW(전세)")
+    s.add_argument("--keyword", help="기존 CLI 호환용 키워드 필터(현재 공개 피드에서는 미사용)")
+    s.add_argument("--only-verified", action="store_true", help="기존 CLI 호환용 인증 매물 플래그")
     s.add_argument("--expand", action="store_true", help="같은 구/시 인접 동까지 확장 검색")
     s.add_argument("--expand-max", type=int, default=6, help="확장 시 인접 동 최대 개수 (기본 6)")
     s.add_argument("--titles", type=int, default=5, help="상세 JSON-LD로 제목·층수 보강할 상위 N개 (기본 5, 0=비활성)")
