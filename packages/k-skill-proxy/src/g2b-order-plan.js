@@ -198,7 +198,7 @@ function extractOrderPlanItems(payload) {
   const response = payload?.response ?? {};
   const header = response.header ?? {};
   const resultCode = String(header.resultCode ?? "");
-  if (resultCode && !["00", "0"].includes(resultCode)) {
+  if (resultCode && !["00", "0", "03"].includes(resultCode)) {
     throw new Error(`resultCode=${resultCode} ${header.resultMsg ?? "no message"}`.trim());
   }
   const body = response.body ?? {};

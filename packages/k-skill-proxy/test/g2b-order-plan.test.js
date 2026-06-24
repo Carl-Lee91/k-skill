@@ -107,6 +107,36 @@ test("g2b order-plans route proxies search to the selected PPS operation and cac
   assert.equal(cached.json().proxy.cache.hit, true);
   assert.equal(seenUrls.length, 1);
 });
+test("g2b order-plans route treats upstream no-data as an empty result", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response(
+    JSON.stringify({
+      response: {
+        header: { resultCode: "03", resultMsg: "NODATA_ERROR" },
+        body: { pageNo: 1, numOfRows: 10, totalCount: 0, items: "" }
+      }
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+  const app = buildServer({ env: { DATA_GO_KR_API_KEY: "data-go-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const res = await app.inject({
+    method: "GET",
+    url: "/v1/g2b/order-plans?kind=service&keyword=" + encodeURIComponent("존재하지않는검색어")
+      + "&orderFrom=2025-01&orderTo=2025-01&postedFrom=2025-01-01&postedTo=2025-01-31"
+  });
+  const body = res.json();
+
+  assert.equal(res.statusCode, 200);
+  assert.equal(body.total_count, 0);
+  assert.deepEqual(body.items, []);
+  assert.equal(body.query.operation, "getOrderPlanSttusListServcPPSSrch");
+});
+
 
 test("g2b order-plans route reports missing proxy key", async (t) => {
   const app = buildServer();
