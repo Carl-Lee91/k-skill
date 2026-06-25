@@ -238,6 +238,8 @@
 - 금융위 기업개요 endpoint: https://apis.data.go.kr/1160100/service/GetCorpBasicInfoService_V2/getCorpOutline_V2
 - 조달청 나라장터 사용자정보 서비스(부정당제재업체정보조회 포함): https://www.data.go.kr/data/15129466/openapi.do
 - 부정당제재 endpoint: https://apis.data.go.kr/1230000/ao/UsrInfoService02/getUnptRsttCorpInfo02 (inqryDiv=1 사업자번호 정확일치, 조회시점 유효 제재만)
+- 조달청 나라장터 발주계획현황서비스: https://www.data.go.kr/data/15129462/openapi.do
+- 발주계획현황 endpoint: https://apis.data.go.kr/1230000/ao/OrderPlanSttusService (물품/공사/용역/외자 발주계획 검색)
 - 국세청 고액·상습체납자 명단공개(무인증): https://www.nts.go.kr/nts/ad/openInfo/selectList.do
 - 지방행정 인허가데이터 LOCALDATA 파일 다운로드(무인증, CP949 CSV): https://file.localdata.go.kr/file/download/<업종slug>/info?orgCode=<지자체코드>
 - LOCALDATA 본체: https://www.localdata.go.kr
