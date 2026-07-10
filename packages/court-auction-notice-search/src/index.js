@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Public court-auction orchestration facade; transport and protocol codecs are split modules.
 "use strict";
 
 const {

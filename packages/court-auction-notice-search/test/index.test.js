@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Cohesive public API regression matrix for all court-auction operations and fallbacks.
 "use strict";
 
 const test = require("node:test");

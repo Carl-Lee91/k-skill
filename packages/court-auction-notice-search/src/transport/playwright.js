@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Single Playwright fallback adapter whose page lifecycle and operation dispatch share state.
 "use strict";
 
 const {

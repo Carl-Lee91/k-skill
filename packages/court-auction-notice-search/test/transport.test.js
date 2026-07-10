@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Cohesive HTTP and Playwright transport failure/fallback integration matrix.
 "use strict";
 
 const test = require("node:test");

@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Cohesive Hi-Pass request, parser, fixture, and CLI contract regression matrix.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const childProcess = require("node:child_process");

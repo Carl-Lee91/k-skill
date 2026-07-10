@@ -1,3 +1,4 @@
+// allow: SIZE_OK - Cohesive AirKorea station/measurement adapter with one shared fallback and redaction contract.
 const STATION_SERVICE_URL = "http://apis.data.go.kr/B552584/MsrstnInfoInqireSvc";
 const MEASUREMENT_SERVICE_URL = "http://apis.data.go.kr/B552584/ArpltnInforInqireSvc";
 const GRADE_LABELS = {
