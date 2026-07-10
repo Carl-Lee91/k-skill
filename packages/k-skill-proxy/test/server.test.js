@@ -193,6 +193,8 @@ test("KR WHOIS domain normalizer accepts only .kr and .한국 domains", () => {
   assert.throws(() => normalizeKrWhoisDomainQuery({}), /domain/);
   assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "example.com" }), /\.kr/);
   assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "bad..or.kr" }), /valid domain/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "-bad.or.kr" }), /valid domain/);
+  assert.throws(() => normalizeKrWhoisDomainQuery({ domain: "bad-.or.kr" }), /valid domain/);
 });
 
 test("KR WHOIS domain route injects serviceKey server-side and caches success", async (t) => {
@@ -598,6 +600,42 @@ test("KOPIS routes inject service key and cache list responses", async (t) => {
   const second = await app.inject({ method: "GET", url: "/v1/kopis/performances?start=20260101&end=20260131&limit=5" });
   assert.equal(second.statusCode, 200);
   assert.equal(calls.length, 1);
+});
+
+test("Assembly and KOPIS semantic errors are not cached so retries self-heal", async (t) => {
+  const originalFetch = global.fetch;
+  let assemblyCalls = 0;
+  let kopisCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes("open.assembly.go.kr")) {
+      assemblyCalls += 1;
+      const body = assemblyCalls === 1
+        ? JSON.stringify({ RESULT: { CODE: "ERROR-300", MESSAGE: "KEY ERROR" } })
+        : JSON.stringify({ ALLBILLV2: [{ head: [{ list_total_count: 1 }, { RESULT: { CODE: "INFO-000", MESSAGE: "OK" } }] }, { row: [{ BILL_ID: "B1" }] }] });
+      return new Response(body, { status: 200, headers: { "content-type": "application/json" } });
+    }
+    kopisCalls += 1;
+    const body = kopisCalls === 1
+      ? "<error><code>01</code><msg>SERVICE ERROR</msg></error>"
+      : "<dbs><db><mt20id>PF1</mt20id><prfnm>햄릿</prfnm></db></dbs>";
+    return new Response(body, { status: 200, headers: { "content-type": "application/xml" } });
+  };
+
+  const app = buildServer({ env: { ASSEMBLY_API_KEY: "assembly-key", KOPIS_API_KEY: "kopis-key" } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const assemblyUrl = "/v1/assembly/bills?query=%EA%B0%84%ED%98%B8%EB%B2%95";
+  assert.equal((await app.inject({ method: "GET", url: assemblyUrl })).statusCode, 200);
+  assert.match((await app.inject({ method: "GET", url: assemblyUrl })).body, /B1/);
+  assert.equal(assemblyCalls, 2, "Assembly semantic errors must not be cached");
+
+  const kopisUrl = "/v1/kopis/performances?start=20260101&end=20260131&limit=5";
+  assert.equal((await app.inject({ method: "GET", url: kopisUrl })).statusCode, 200);
+  assert.match((await app.inject({ method: "GET", url: kopisUrl })).body, /PF1/);
+  assert.equal(kopisCalls, 2, "KOPIS semantic errors must not be cached");
 });
 
 test("KOPIS detail and facility routes preserve narrow upstream paths", async (t) => {

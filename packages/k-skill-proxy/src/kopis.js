@@ -109,6 +109,10 @@ function normalizeKopisDetailQuery(query = {}, idLabel = "id") {
   return { id };
 }
 
+function isKopisErrorBody(text) {
+  return /<(?:error|errorcode|errormsg)(?:\s|>)/i.test(String(text));
+}
+
 async function proxyKopisRequest({ path, params = {}, serviceKey, fetchImpl = global.fetch }) {
   if (!serviceKey) {
     return {
@@ -141,6 +145,7 @@ async function proxyKopisRequest({ path, params = {}, serviceKey, fetchImpl = gl
 
 module.exports = {
   KOPIS_BASE_URL,
+  isKopisErrorBody,
   normalizeKopisDetailQuery,
   normalizeKopisListQuery,
   proxyKopisRequest

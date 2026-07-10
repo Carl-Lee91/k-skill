@@ -20,6 +20,10 @@ function normalizeKrWhoisDomainQuery(query = {}) {
   if (normalized.includes("..") || normalized.startsWith(".") || normalized.endsWith(".")) {
     throw new Error("Provide a valid domain.");
   }
+  const labels = normalized.split(".");
+  if (normalized.length > 253 || labels.some((label) => !label || label.length > 63 || label.startsWith("-") || label.endsWith("-"))) {
+    throw new Error("Provide a valid domain.");
+  }
   return { query: normalized, answer: "json" };
 }
 

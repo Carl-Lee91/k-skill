@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const Fastify = require("fastify");
 const {
+  isAssemblyErrorBody,
   normalizeAssemblyBillDetailQuery,
   normalizeAssemblyBillSearchQuery,
   normalizeAssemblyVoteQuery,
@@ -64,7 +65,7 @@ const {
   proxyNhisCheckupRequest,
   proxyNhisLongTermCareRequest
 } = require("./nhis-care");
-const { normalizeKopisDetailQuery, normalizeKopisListQuery, proxyKopisRequest } = require("./kopis");
+const { isKopisErrorBody, normalizeKopisDetailQuery, normalizeKopisListQuery, proxyKopisRequest } = require("./kopis");
 const { normalizeKrWhoisDomainQuery, proxyKrWhoisDomainRequest } = require("./kr-whois");
 const AIR_KOREA_UPSTREAM_BASE_URL = "http://apis.data.go.kr";
 const DATA_GO_KR_UPSTREAM_BASE_URL = "https://apis.data.go.kr";
@@ -2037,7 +2038,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
       params: normalized,
       apiKey: config.assemblyApiKey
     });
-    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && !isAssemblyErrorBody(upstream.body)) {
       cache.set(cacheKey, upstream, config.cacheTtlMs);
     }
     reply.code(upstream.statusCode);
@@ -2588,7 +2589,7 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     }
 
     const upstream = await proxyKopisRequest({ path, params: normalized, serviceKey: config.kopisApiKey });
-    if (upstream.statusCode >= 200 && upstream.statusCode < 300) {
+    if (upstream.statusCode >= 200 && upstream.statusCode < 300 && !isKopisErrorBody(upstream.body)) {
       cache.set(cacheKey, upstream, config.cacheTtlMs);
     }
     reply.code(upstream.statusCode);

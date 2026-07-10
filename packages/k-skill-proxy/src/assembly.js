@@ -120,6 +120,26 @@ function normalizeAssemblyVoteQuery(query = {}) {
   return normalized;
 }
 
+function isAssemblyErrorBody(text) {
+  let payload;
+  try {
+    payload = JSON.parse(String(text));
+  } catch {
+    return false;
+  }
+  const queue = [payload];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== "object") continue;
+    if (current.RESULT && typeof current.RESULT === "object") {
+      const code = String(current.RESULT.CODE ?? current.RESULT.code ?? "").trim();
+      if (code && code !== "INFO-000") return true;
+    }
+    queue.push(...Object.values(current));
+  }
+  return false;
+}
+
 async function proxyAssemblyRequest({ operation, params, apiKey, fetchImpl = global.fetch }) {
   if (!apiKey) {
     return {
@@ -150,6 +170,7 @@ async function proxyAssemblyRequest({ operation, params, apiKey, fetchImpl = glo
 
 module.exports = {
   ASSEMBLY_BASE_URL,
+  isAssemblyErrorBody,
   normalizeAssemblyBillDetailQuery,
   normalizeAssemblyBillSearchQuery,
   normalizeAssemblyVoteQuery,
