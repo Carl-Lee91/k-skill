@@ -27,6 +27,7 @@ env:
 jobs:
   deploy:
     name: Build and deploy
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,6 +74,8 @@ jobs:
           service: ${{ env.SERVICE_NAME }}
           region: ${{ env.GCP_REGION }}
           image: ${{ steps.image.outputs.uri }}
+          tag: candidate
+          no_traffic: true
           secrets: |-
             AIR_KOREA_OPEN_API_KEY=AIR_KOREA_OPEN_API_KEY:latest
             ASSEMBLY_API_KEY=ASSEMBLY_API_KEY:latest
@@ -95,8 +98,10 @@ jobs:
             KSKILL_PROXY_HOST=0.0.0.0
             KSKILL_PROXY_NAME=k-skill-proxy
             KSKILL_PROXY_CACHE_TTL_MS=300000
+            KSKILL_PROXY_CACHE_MAX_ENTRIES=1000
             KSKILL_PROXY_RATE_LIMIT_WINDOW_MS=60000
             KSKILL_PROXY_RATE_LIMIT_MAX=60
+            KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS=10000
           flags: >-
             --platform=managed
             --allow-unauthenticated
@@ -134,6 +139,13 @@ jobs:
               sys.exit(1)
           print('Health OK. All upstreams configured.')
           "
+
+      - name: Promote the healthy revision to production traffic
+        run: >-
+          gcloud run services update-traffic "${SERVICE_NAME}"
+          --region "${GCP_REGION}"
+          --to-latest
+          --quiet
 
       - name: Smoke test custom domain (k-skill-proxy.nomadamas.org)
         run: |

@@ -27,8 +27,9 @@
    - WIF로 `${GCP_DEPLOY_SERVICE_ACCOUNT}`로 impersonate
    - `packages/k-skill-proxy/Dockerfile`로 컨테이너 빌드
    - Artifact Registry에 `:${GITHUB_SHA}` 태그로 push
-   - Cloud Run `k-skill-proxy` 서비스를 새 이미지로 재배포 (Secret Manager 시크릿 + 런타임 env 주입)
-   - 새 revision의 `*.run.app` URL과 `https://k-skill-proxy.nomadamas.org/health`에 smoke test
+   - Cloud Run `k-skill-proxy`에 `candidate` 태그와 0% traffic으로 새 revision 배포 (Secret Manager 시크릿 + 런타임 env 주입)
+   - `candidate` revision의 `*.run.app` URL에서 `/health` smoke test
+   - smoke test 통과 후 새 revision으로 production traffic을 전환하고 `https://k-skill-proxy.nomadamas.org/health` 확인
 5. 실패 시 GitHub Actions 페이지에서 로그 확인. Cloud Run 자체는 마지막 healthy revision에 트래픽을 유지한다.
 
 ## 1회성 GCP 셋업

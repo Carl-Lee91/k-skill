@@ -658,18 +658,27 @@ test("proxy deployment workflow and docs stay aligned with Cloud Run automation"
   const featureDoc = read(path.join("docs", "features", "k-skill-proxy.md"));
   const packageReadme = read(path.join("packages", "k-skill-proxy", "README.md"));
   const dockerfile = read(path.join("packages", "k-skill-proxy", "Dockerfile"));
+  const dockerignore = read(".dockerignore");
+  const npmReleaseWorkflow = read(path.join(".github", "workflows", "release-npm.yml"));
   const proxyPackage = JSON.parse(read(path.join("packages", "k-skill-proxy", "package.json")));
 
   assert.match(workflow, /^name: Deploy k-skill-proxy to Cloud Run$/m);
   assert.match(workflow, /^\s+branches: \[main\]$/m);
+  assert.match(workflow, /^\s+if: github\.ref == 'refs\/heads\/main'$/m);
   assert.match(workflow, /^\s+id-token: write$/m);
   assert.match(workflow, /google-github-actions\/auth@v3/);
   assert.match(workflow, /google-github-actions\/deploy-cloudrun@v3/);
   assert.match(workflow, /ASSEMBLY_API_KEY=ASSEMBLY_API_KEY:latest/);
   assert.match(workflow, /KOPIS_API_KEY=KOPIS_API_KEY:latest/);
+  assert.match(workflow, /^\s+tag: candidate$/m);
+  assert.match(workflow, /^\s+no_traffic: true$/m);
   assert.match(workflow, /Smoke test \/health on the new revision/);
+  assert.match(workflow, /gcloud run services update-traffic/);
+  assert.match(workflow, /--to-latest/);
   assert.match(dockerfile, /COPY package\.json package-lock\.json/);
   assert.match(dockerfile, /npm ci --omit=dev --workspace k-skill-proxy/);
+  assert.match(dockerignore, /^gha-creds-\*\.json$/m);
+  assert.doesNotMatch(npmReleaseWorkflow, /^\s+workflow_dispatch:/m);
   assert.equal(proxyPackage.engines.node, ">=20");
 
   for (const doc of [agents, deployDoc, featureDoc, packageReadme]) {
@@ -680,6 +689,8 @@ test("proxy deployment workflow and docs stay aligned with Cloud Run automation"
   assert.match(agents, /\.github\/workflows\/deploy-k-skill-proxy\.yml/);
   assert.match(deployDoc, /Workload Identity Federation/);
   assert.match(deployDoc, /GCP Secret Manager|Secret Manager/);
+  assert.match(deployDoc, /0% traffic/);
+  assert.match(deployDoc, /smoke test 통과 후 새 revision으로 production traffic/);
 });
 
 test("kakaotalk-mac skill documents katok archive search usage", () => {

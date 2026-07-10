@@ -212,15 +212,13 @@ async function fetchJson(baseUrl, params, { fetchImpl = global.fetch, headers = 
   });
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "");
-
     if (response.status === 403) {
       throw new Error(
         "AirKorea upstream returned 403 Forbidden. 기술문서 기준 후보 원인: 활용신청 후 동기화 대기(1~2시간), 활용신청하지 않은 API 호출, 서비스키 인코딩/서비스키 오류, 등록하지 않은 도메인 또는 IP.",
       );
     }
 
-    throw new Error(`AirKorea request failed with ${response.status} for ${url}${body ? ` :: ${body.slice(0, 200)}` : ""}`);
+    throw new Error(`AirKorea upstream request failed with HTTP ${response.status}.`);
   }
 
   return JSON.parse(await response.text());

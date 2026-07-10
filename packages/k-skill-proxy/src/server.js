@@ -216,8 +216,10 @@ function buildConfig(env = process.env) {
     lawReferer: trimOrNull(env.LAW_REFERER),
     lawUserAgent: trimOrNull(env.LAW_USER_AGENT),
     cacheTtlMs: parseInteger(env.KSKILL_PROXY_CACHE_TTL_MS, 300000),
+    cacheMaxEntries: Math.max(1, parseInteger(env.KSKILL_PROXY_CACHE_MAX_ENTRIES, 1000)),
     rateLimitWindowMs: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_WINDOW_MS, 60000),
-    rateLimitMax: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX, 60)
+    rateLimitMax: parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX, 60),
+    rateLimitMaxClients: Math.max(1, parseInteger(env.KSKILL_PROXY_RATE_LIMIT_MAX_CLIENTS, 10000))
   };
 }
 
@@ -248,8 +250,25 @@ function isFailureResponse(value) {
   return false;
 }
 
-function createMemoryCache() {
+function createMemoryCache({ maxEntries = 1000, now = Date.now } = {}) {
   const entries = new Map();
+
+  function makeRoom() {
+    if (entries.size < maxEntries) {
+      return;
+    }
+
+    const currentTime = now();
+    for (const [key, entry] of entries) {
+      if (entry.expiresAt <= currentTime) {
+        entries.delete(key);
+      }
+    }
+
+    while (entries.size >= maxEntries) {
+      entries.delete(entries.keys().next().value);
+    }
+  }
 
   return {
     get(key) {
@@ -258,7 +277,7 @@ function createMemoryCache() {
         return null;
       }
 
-      if (cached.expiresAt <= Date.now()) {
+      if (cached.expiresAt <= now()) {
         entries.delete(key);
         return null;
       }
@@ -269,27 +288,47 @@ function createMemoryCache() {
       if (isFailureResponse(value)) {
         return false;
       }
+      makeRoom();
       entries.set(key, {
         value,
-        expiresAt: Date.now() + ttlMs
+        expiresAt: now() + ttlMs
       });
       return true;
     }
   };
 }
 
-function buildRateLimiter(config) {
+function buildRateLimiter(config, { now = Date.now } = {}) {
   const state = new Map();
+
+  function makeRoom(currentTime) {
+    if (state.size < config.rateLimitMaxClients) {
+      return;
+    }
+
+    for (const [key, entry] of state) {
+      if (entry.resetAt <= currentTime) {
+        state.delete(key);
+      }
+    }
+
+    while (state.size >= config.rateLimitMaxClients) {
+      state.delete(state.keys().next().value);
+    }
+  }
 
   return function rateLimit(request, reply) {
     const key = request.ip || "unknown";
-    const now = Date.now();
+    const currentTime = now();
     const current = state.get(key);
 
-    if (!current || current.resetAt <= now) {
+    if (!current || current.resetAt <= currentTime) {
+      if (!current) {
+        makeRoom(currentTime);
+      }
       state.set(key, {
         count: 1,
-        resetAt: now + config.rateLimitWindowMs
+        resetAt: currentTime + config.rateLimitWindowMs
       });
       return true;
     }
@@ -298,7 +337,7 @@ function buildRateLimiter(config) {
       reply.code(429).send({
         error: "rate_limited",
         message: "Too many requests.",
-        retry_after_ms: current.resetAt - now
+        retry_after_ms: current.resetAt - currentTime
       });
       return false;
     }
@@ -1870,7 +1909,7 @@ function validateHouseholdWastePaginationQuery(query) {
 
 function buildServer({ env = process.env, provider = null, now = () => new Date() } = {}) {
   const config = buildConfig(env);
-  const cache = createMemoryCache();
+  const cache = createMemoryCache({ maxEntries: config.cacheMaxEntries });
   const rateLimit = buildRateLimiter(config);
   const app = Fastify({
     logger: true,
@@ -5370,6 +5409,7 @@ if (require.main === module) {
 
 module.exports = {
   buildConfig,
+  buildRateLimiter,
   buildServer,
   convertLatLonToKmaGrid,
   createMemoryCache,

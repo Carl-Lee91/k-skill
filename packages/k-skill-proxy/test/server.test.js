@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   buildServer,
+  buildRateLimiter,
   createMemoryCache,
   isFailureResponse,
   makeCacheKey,
@@ -85,6 +86,43 @@ test("createMemoryCache refuses to store failure responses", () => {
 
   assert.equal(cache.set("k4", { items: [{ id: 1 }] }, 60000), true);
   assert.deepEqual(cache.get("k4"), { items: [{ id: 1 }] }, "successful payload must be stored");
+});
+
+test("createMemoryCache stays bounded and evicts expired or oldest entries", () => {
+  let currentTime = 1000;
+  const cache = createMemoryCache({ maxEntries: 2, now: () => currentTime });
+
+  cache.set("expired", { value: 1 }, 10);
+  cache.set("fresh", { value: 2 }, 1000);
+  currentTime = 1020;
+  cache.set("next", { value: 3 }, 1000);
+
+  assert.equal(cache.get("expired"), null);
+  assert.deepEqual(cache.get("fresh"), { value: 2 });
+  assert.deepEqual(cache.get("next"), { value: 3 });
+
+  cache.set("last", { value: 4 }, 1000);
+  assert.equal(cache.get("fresh"), null, "oldest live entry should be evicted at capacity");
+  assert.deepEqual(cache.get("next"), { value: 3 });
+  assert.deepEqual(cache.get("last"), { value: 4 });
+});
+
+test("rate limiter bounds tracked client IPs", () => {
+  let currentTime = 1000;
+  const limiter = buildRateLimiter({
+    rateLimitWindowMs: 1000,
+    rateLimitMax: 1,
+    rateLimitMaxClients: 2
+  }, { now: () => currentTime });
+  const reply = { code() { return this; }, send() {} };
+
+  assert.equal(limiter({ ip: "198.51.100.1" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.2" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.3" }, reply), true);
+  assert.equal(limiter({ ip: "198.51.100.1" }, reply), true, "evicted IP should start a fresh window");
+
+  currentTime = 2500;
+  assert.equal(limiter({ ip: "198.51.100.4" }, reply), true, "expired entries should be removed before eviction");
 });
 
 test("Korean holiday normalizer validates operation and solar year/month", () => {
@@ -2549,6 +2587,32 @@ test("public AirKorea passthrough route forwards allowed upstream responses", as
 
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /resultCode/);
+});
+
+test("fine dust upstream failures do not expose the AirKorea service key", async (t) => {
+  const originalFetch = global.fetch;
+  global.fetch = async () => new Response("failed serviceKey=airkorea-secret", { status: 500 });
+
+  const app = buildServer({
+    env: {
+      AIR_KOREA_OPEN_API_KEY: "airkorea-secret"
+    }
+  });
+
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const response = await app.inject({
+    method: "GET",
+    url: "/v1/fine-dust/report?stationName=%EA%B0%95%EB%82%A8%EA%B5%AC"
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.doesNotMatch(response.body, /airkorea-secret/);
+  assert.doesNotMatch(response.body, /serviceKey=/);
+  assert.match(response.json().message, /HTTP 500/);
 });
 
 test("seoul subway endpoint caches successful upstream responses for normalized queries", async (t) => {
