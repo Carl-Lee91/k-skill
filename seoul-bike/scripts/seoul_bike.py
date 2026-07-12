@@ -29,7 +29,7 @@ for _stream in (sys.stdout, sys.stderr):
 TIMEOUT_SEC = 15
 PROXY_BASE_URL_NAME = "KSKILL_PROXY_BASE_URL"
 DEFAULT_PROXY_BASE_URL = "https://k-skill-proxy.nomadamas.org"
-PROXY_DOWN_MSG = "k-skill-proxy 서버(k-skill-proxy.nomadamas.org)가 응답하지 않습니다. 잠시 후 재시도하거나 운영자에게 문의하세요."
+PROXY_DOWN_MSG = "설정된 k-skill-proxy 서버가 응답하지 않습니다. 잠시 후 재시도하거나 운영자에게 문의하세요."
 PROXY_KEY_NOT_CONFIGURED_MSG = "k-skill-proxy에 필요한 API 키가 설정되어 있지 않습니다. 운영자에게 문의하세요."
 
 

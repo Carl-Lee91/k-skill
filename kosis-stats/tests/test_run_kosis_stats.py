@@ -254,6 +254,15 @@ class JsonHandlingTest(unittest.TestCase):
 
 
 class ErrorDetectionTest(unittest.TestCase):
+    def test_proxy_not_configured_body_requires_matching_error_code(self):
+        self.assertTrue(helper.is_proxy_not_configured_body(
+            '{"error":"upstream_not_configured","message":"missing key"}'
+        ))
+        self.assertFalse(helper.is_proxy_not_configured_body(
+            '{"error":"maintenance","message":"try later"}'
+        ))
+        self.assertFalse(helper.is_proxy_not_configured_body("temporarily unavailable"))
+
     def test_err_field_detected(self):
         err = helper.detect_kosis_error({"err": "31", "errMsg": "조회결과 초과"})
         self.assertIsNotNone(err)
