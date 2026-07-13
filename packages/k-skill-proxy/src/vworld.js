@@ -191,7 +191,9 @@ function redactCredential(body, apiKey) {
 
 function containsCredentialEncoding(value, apiKey) {
   let candidate = String(value);
-  for (let depth = 0; depth < 6; depth += 1) {
+  const seen = new Set();
+  while (!seen.has(candidate)) {
+    seen.add(candidate);
     if (candidate.includes(apiKey)) {
       return true;
     }
@@ -207,7 +209,7 @@ function containsCredentialEncoding(value, apiKey) {
     }
     candidate = urlDecoded;
   }
-  return candidate.includes(apiKey);
+  return false;
 }
 
 function projectString(value, apiKey, maxLength) {
@@ -230,16 +232,6 @@ function projectUntruncatedString(value, apiKey) {
   return redactCredential(value, apiKey);
 }
 
-function projectCode(value, fallback, { allowEmpty = false } = {}) {
-  if (typeof value !== "string") {
-    return fallback;
-  }
-  if (allowEmpty && value === "") {
-    return "";
-  }
-  return /^[A-Z0-9_-]{1,64}$/i.test(value) ? value : fallback;
-}
-
 function projectVWorldBody(operation, body, apiKey) {
   let payload;
   try {
@@ -256,9 +248,9 @@ function projectVWorldBody(operation, body, apiKey) {
     if (response?.status !== "OK") {
       return JSON.stringify({
         response: {
-          status: projectCode(response?.status, "ERROR"),
+          status: "ERROR",
           error: {
-            code: projectCode(response?.error?.code, "UPSTREAM_ERROR"),
+            code: "UPSTREAM_ERROR",
             text: "VWorld search request failed."
           }
         }
@@ -283,7 +275,7 @@ function projectVWorldBody(operation, body, apiKey) {
 
   if (operation === "prices") {
     const prices = payload?.apartHousingPrices;
-    const resultCode = projectCode(prices?.resultCode, "UPSTREAM_ERROR", { allowEmpty: true });
+    const resultCode = prices?.resultCode === "" ? "" : "UPSTREAM_ERROR";
     if (resultCode !== "") {
       return JSON.stringify({
         apartHousingPrices: {

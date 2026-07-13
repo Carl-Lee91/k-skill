@@ -142,6 +142,33 @@ test("requires a credential and recognizes only semantic VWorld successes", asyn
   );
 });
 
+test("response projection replaces upstream error codes with fixed safe values", () => {
+  const secret = "SYNTHETICSECRET";
+  const search = JSON.parse(projectVWorldBody(
+    "search",
+    JSON.stringify({ response: { status: secret, error: { code: secret, text: secret } } }),
+    secret
+  ));
+  const prices = JSON.parse(projectVWorldBody(
+    "prices",
+    JSON.stringify({ apartHousingPrices: { resultCode: secret, resultMsg: secret } }),
+    secret
+  ));
+
+  assert.deepEqual(search, {
+    response: {
+      status: "ERROR",
+      error: { code: "UPSTREAM_ERROR", text: "VWorld search request failed." }
+    }
+  });
+  assert.deepEqual(prices, {
+    apartHousingPrices: {
+      resultCode: "UPSTREAM_ERROR",
+      resultMsg: "VWorld apartment-price request failed."
+    }
+  });
+});
+
 test("response projection never truncates an invalid price identity into a valid one", () => {
   const body = projectVWorldBody(
     "prices",
@@ -295,6 +322,8 @@ test("VWorld search route delegates its header credential, caches success, and n
   assert.equal(queryCredential.statusCode, 400);
   assert.doesNotMatch(first.body, /delegated-secret/);
   assert.doesNotMatch(missing.body, /delegated-secret/);
+  assert.equal(first.headers["cache-control"], "private, no-store");
+  assert.equal(first.headers.vary, "x-k-skill-vworld-api-key");
 });
 
 test("VWorld apartment-price route preserves JSON and does not cache semantic errors", async (t) => {
@@ -332,7 +361,7 @@ test("VWorld apartment-price route preserves JSON and does not cache semantic er
   const cached = await app.inject(request);
 
   assert.equal(failed.statusCode, 200);
-  assert.equal(failed.json().apartHousingPrices.resultCode, "AUTH");
+  assert.equal(failed.json().apartHousingPrices.resultCode, "UPSTREAM_ERROR");
   assert.equal(recovered.json().apartHousingPrices.field[0].pblntfPc, "587000000");
   assert.deepEqual(cached.json(), recovered.json());
   assert.equal(calls, 2, "semantic failures must not be cached, while the recovered response must be cached");
@@ -414,7 +443,10 @@ test("credential-scoped cache and projected responses reject reversible credenti
     const unicodeEscaped = [...key]
       .map((character) => `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`)
       .join("");
-    const repeatedlyEncoded = encodeURIComponent(encodeURIComponent(key));
+    let repeatedlyEncoded = key;
+    for (let depth = 0; depth < 10; depth += 1) {
+      repeatedlyEncoded = encodeURIComponent(repeatedlyEncoded);
+    }
     return Response.json({
       response: {
         status: "OK",

@@ -2138,6 +2138,8 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
   });
 
   async function handleVWorldRoute({ operation, normalize, cacheRoute, request, reply }) {
+    reply.header("cache-control", "private, no-store");
+    reply.header("vary", VWORLD_CREDENTIAL_HEADER);
     let normalized;
     try {
       normalized = normalize(request.query || {});
