@@ -12,12 +12,36 @@ from unittest import mock
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 MODULE_PATH = ROOT / "keris-academic-search" / "scripts" / "keris_academic.py"
 SPEC = importlib.util.spec_from_file_location("keris_academic", MODULE_PATH)
-keris_academic = importlib.util.module_from_spec(SPEC)
+assert SPEC is not None
 assert SPEC.loader is not None
+keris_academic = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(keris_academic)
 
 
 class KerisAcademicHelperTests(unittest.TestCase):
+    def test_single_type_pagination_command_contract(self):
+        stdout = io.StringIO()
+        seen_urls = []
+
+        def fake_http_get_json(url, timeout, via_proxy=True):
+            del timeout, via_proxy
+            seen_urls.append(url)
+            return {"page": 2, "page_size": 20, "total_count": 0, "items": []}
+
+        with mock.patch.object(keris_academic, "http_get_json", side_effect=fake_http_get_json), contextlib.redirect_stdout(stdout):
+            code = keris_academic.run([
+                "search", "--keyword", "한국어 교육", "--resource-type", "D",
+                "--page", "2", "--page-size", "20", "--json",
+            ])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(seen_urls), 1)
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(seen_urls[0]).query)
+        self.assertEqual(query["resourceType"], ["D"])
+        self.assertEqual(query["page"], ["2"])
+        self.assertEqual(query["pageSize"], ["20"])
+        self.assertEqual(json.loads(stdout.getvalue())["page"], 2)
+
     def test_proxy_url_has_no_caller_key_and_strict_pagination(self):
         args = keris_academic.parse_args([
             "search", "--keyword", "인공지능 교육", "--resource-type", "B",

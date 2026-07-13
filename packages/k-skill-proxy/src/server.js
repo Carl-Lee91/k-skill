@@ -332,7 +332,14 @@ function buildRateLimiter(config, { now = Date.now } = {}) {
     }
   }
 
-  return function rateLimit(request, reply) {
+  return function rateLimit(request, reply, cost = 1) {
+    if (!Number.isInteger(cost) || cost < 0) {
+      throw new Error("Rate-limit cost must be a non-negative integer.");
+    }
+    if (cost === 0) {
+      return true;
+    }
+
     const key = request.ip || "unknown";
     const currentTime = now();
     const current = state.get(key);
@@ -341,14 +348,22 @@ function buildRateLimiter(config, { now = Date.now } = {}) {
       if (!current) {
         makeRoom(currentTime);
       }
+      if (cost > config.rateLimitMax) {
+        reply.code(429).send({
+          error: "rate_limited",
+          message: "Too many requests.",
+          retry_after_ms: config.rateLimitWindowMs
+        });
+        return false;
+      }
       state.set(key, {
-        count: 1,
+        count: cost,
         resetAt: currentTime + config.rateLimitWindowMs
       });
       return true;
     }
 
-    if (current.count >= config.rateLimitMax) {
+    if (current.count + cost > config.rateLimitMax) {
       reply.code(429).send({
         error: "rate_limited",
         message: "Too many requests.",
@@ -357,7 +372,7 @@ function buildRateLimiter(config, { now = Date.now } = {}) {
       return false;
     }
 
-    current.count += 1;
+    current.count += cost;
     return true;
   };
 }
@@ -2039,10 +2054,6 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
   const config = buildConfig(env);
   const cache = createMemoryCache({ maxEntries: config.cacheMaxEntries });
   const rateLimit = buildRateLimiter(config);
-  const kerisCompositeRateLimits = new Map([2, 6].map((cost) => [cost, buildRateLimiter({
-    ...config,
-    rateLimitMax: Math.max(1, Math.floor(config.rateLimitMax / cost))
-  })]));
   const app = Fastify({
     logger: true,
     logController: new LogController({ disableRequestLogging: true }),
@@ -3030,8 +3041,8 @@ function buildServer({ env = process.env, provider = null, now = () => new Date(
     const cacheKey = makeCacheKey({ route: "keris-academic-search", ...normalized });
     const cached = cache.get(cacheKey);
     if (cached) return { ...cached, proxy: { ...cached.proxy, cache: { hit: true, ttl_ms: config.cacheTtlMs } } };
-    const compositeRateLimit = kerisCompositeRateLimits.get(normalized.upstreamTypes.length);
-    if (compositeRateLimit && !compositeRateLimit(request, reply)) return reply;
+    const extraCost = normalized.upstreamTypes.length - 1;
+    if (extraCost > 0 && !rateLimit(request, reply, extraCost)) return reply;
     const result = await fetchKerisAcademicSearch({ params: normalized, apiKey: config.rissApiKey });
     if (result.error) {
       reply.code(result.status_code || 502);

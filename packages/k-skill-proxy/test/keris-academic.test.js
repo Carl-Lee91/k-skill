@@ -234,3 +234,63 @@ test("combined RISS fan-out consumes a proportional route rate limit", async (t)
   assert.equal(second.statusCode, 429);
   assert.equal(second.json().error, "rate_limited");
 });
+
+test("mixed RISS traffic shares one weighted rate-limit budget", async (t) => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return new Response(SUCCESS_XML, { status: 200 });
+  };
+  const app = buildServer({ env: {
+    KSKILL_RISS_API_KEY: "server-key",
+    KSKILL_PROXY_RATE_LIMIT_MAX: "9"
+  } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const all = await app.inject({ method: "GET", url: "/v1/keris-academic/search?keyword=all&resourceType=ALL" });
+  assert.equal(all.statusCode, 200);
+  const articles = await app.inject({ method: "GET", url: "/v1/keris-academic/search?keyword=articles&resourceType=A" });
+  assert.equal(articles.statusCode, 200);
+  const single = await app.inject({ method: "GET", url: "/v1/keris-academic/search?keyword=single&resourceType=T" });
+  assert.equal(single.statusCode, 200);
+  assert.equal(calls, 9);
+
+  const exhausted = await app.inject({ method: "GET", url: "/v1/keris-academic/search?keyword=exhausted&resourceType=B" });
+  assert.equal(exhausted.statusCode, 429);
+  assert.equal(exhausted.json().error, "rate_limited");
+  assert.equal(calls, 9);
+});
+
+test("cached composite RISS traffic charges only the normal request cost", async (t) => {
+  const originalFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return new Response(SUCCESS_XML, { status: 200 });
+  };
+  const app = buildServer({ env: {
+    KSKILL_RISS_API_KEY: "server-key",
+    KSKILL_PROXY_RATE_LIMIT_MAX: "7"
+  } });
+  t.after(async () => {
+    global.fetch = originalFetch;
+    await app.close();
+  });
+
+  const route = "/v1/keris-academic/search?keyword=cached&resourceType=ALL";
+  const first = await app.inject({ method: "GET", url: route });
+  const cached = await app.inject({ method: "GET", url: route });
+  assert.equal(first.statusCode, 200);
+  assert.equal(first.json().proxy.cache.hit, false);
+  assert.equal(cached.statusCode, 200);
+  assert.equal(cached.json().proxy.cache.hit, true);
+  assert.equal(calls, 6);
+
+  const afterCache = await app.inject({ method: "GET", url: "/v1/keris-academic/search?keyword=after-cache&resourceType=T" });
+  assert.equal(afterCache.statusCode, 429);
+  assert.equal(calls, 6);
+});
